@@ -1,0 +1,128 @@
+# Provisionamento de alertas do Grafana, carregado pelo sidecar (label grafana_alert).
+# Os segredos vem do secret grafana-alerting (envFromSecret) via $__env{VAR}.
+# Alert fatigue: guarda de trafego minimo, 'for: 2m', agrupamento e repeat_interval longo.
+# Detalhes em monitoring/alerting/README.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alerting
+  namespace: monitoring
+  labels:
+    grafana_alert: "1"
+data:
+  contactpoints.yaml: |
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: togglemaster-incident
+        receivers:
+          # 1) Incidente no PagerDuty (Events API v2)
+          - uid: cp-pagerduty
+            type: pagerduty
+            settings:
+              integrationKey: $__env{PAGERDUTY_INTEGRATION_KEY}
+              severity: critical
+              class: http-5xx
+              component: '{{ .CommonLabels.service }}'
+              group: togglemaster
+              summary: '{{ .CommonAnnotations.summary }}'
+          # 2) ChatOps no Discord
+          - uid: cp-discord
+            type: discord
+            settings:
+              url: $__env{DISCORD_WEBHOOK_URL}
+              title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} - {{ .CommonLabels.service }}'
+              message: |-
+                {{ .CommonAnnotations.summary }}
+                {{ .CommonAnnotations.description }}
+                Runbook: {{ .CommonAnnotations.runbook_url }}
+                Dashboard: {{ .ExternalURL }}{{ .CommonAnnotations.dashboard_path }}
+                {{ if eq .Status "firing" }}Self-healing: rollout restart de {{ .CommonLabels.service }} solicitado via GitHub Actions.{{ end }}
+      # Self-healing em contact point proprio para ter rota/repeat_interval proprios
+      # (ver policies.yaml). Fora do togglemaster-incident, que repete a cada 4h.
+      - orgId: 1
+        name: togglemaster-selfheal
+        receivers:
+          # Self-healing: repository_dispatch no GitHub, que roda o rollout restart
+          - uid: cp-selfheal
+            type: webhook
+            # o workflow ignora 'resolved'; nem chama a API do GitHub a toa
+            disableResolveMessage: true
+            settings:
+              url: https://api.github.com/repos/alansenairj/togglemaster-gitops/dispatches
+              httpMethod: POST
+              authorization_scheme: Bearer
+              authorization_credentials: $__env{GITHUB_DISPATCH_TOKEN}
+              # GitHub exige event_type no corpo; o payload padrao do Grafana nao serve.
+              payload:
+                template: '{"event_type":"grafana-alert","client_payload":{"service":"{{ .CommonLabels.service }}","alertname":"{{ .CommonLabels.alertname }}","status":"{{ .Status }}"}}'
+  policies.yaml: |
+    apiVersion: 1
+    policies:
+      - orgId: 1
+        receiver: togglemaster-incident
+        group_by: [alertname, service]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
+        routes:
+          # Self-healing: tenta no maximo 1 restart por dia por alerta. Se o restart nao
+          # resolveu, repetir a cada 4h so gera loop de restart; o PagerDuty ja acordou um humano.
+          # continue: true -> o mesmo alerta segue para a rota abaixo (PagerDuty + Discord).
+          - receiver: togglemaster-selfheal
+            object_matchers: [["service", "=~", ".+"]]
+            continue: true
+            repeat_interval: 24h
+          - receiver: togglemaster-incident
+            object_matchers: [["service", "=~", ".+"]]
+  rules.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: togglemaster-slo
+        folder: ToggleMaster
+        interval: 1m
+        rules:
+          - uid: auth-5xx-rate
+            title: AuthServiceHigh5xxRate
+            condition: C
+            for: 2m
+            noDataState: OK
+            execErrState: OK
+            labels:
+              service: auth-service
+              severity: critical
+            annotations:
+              summary: 'auth-service com taxa de erros 5xx acima de 5% (5 min)'
+              description: 'Erros 5xx = spans SERVER com status ERROR (traces_span_metrics_calls_total). Valor atual: {{ printf "%.1f" $values.B.Value }}%'
+              runbook_url: https://github.com/alansenairj/togglemaster-gitops/blob/main/monitoring/alerting/README.md
+              dashboard_path: /d/togglemaster-incidente
+            data:
+              - refId: A
+                relativeTimeRange: {from: 600, to: 0}
+                datasourceUid: prometheus
+                model:
+                  refId: A
+                  instant: true
+                  # Guarda de trafego: so avalia com > 0.05 req/s. Sem ela, 1 erro
+                  # em 2 requisicoes de madrugada daria 50% e acordaria alguem.
+                  expr: >-
+                    (sum(rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER",status_code="STATUS_CODE_ERROR",service_name="auth-service"}[5m])) or vector(0))
+                    / sum(rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER",service_name="auth-service"}[5m])) * 100
+                    and on() sum(rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER",service_name="auth-service"}[5m])) > 0.05
+              - refId: B
+                datasourceUid: __expr__
+                model:
+                  refId: B
+                  type: reduce
+                  expression: A
+                  reducer: last
+                  settings: {mode: dropNN}
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  refId: C
+                  type: threshold
+                  expression: B
+                  conditions:
+                    - evaluator: {type: gt, params: [5]}

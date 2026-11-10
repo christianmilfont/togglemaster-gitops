@@ -5,6 +5,10 @@ admin:
   passwordKey: admin-password
 persistence:
   enabled: false
+# Segredos do alerting (PAGERDUTY_INTEGRATION_KEY, DISCORD_WEBHOOK_URL,
+# GITHUB_DISPATCH_TOKEN). O secret e criado a mao, nada no Git. Ver
+# monitoring/alerting/README.md. Os ConfigMaps de alerta os leem via $__env{VAR}.
+envFromSecret: grafana-alerting
 resources:
   requests: {cpu: 100m, memory: 200Mi}
   limits: {memory: 400Mi}
@@ -12,6 +16,12 @@ sidecar:
   dashboards:
     enabled: true
     label: grafana_dashboard
+    searchNamespace: monitoring
+  # Regras, contact points e politicas vem de ConfigMaps (monitoring/dashboards/alerting.yaml).
+  # Nao use o bloco 'alerting:' do chart: ele passa por tpl e quebra os {{ }} do Grafana.
+  alerts:
+    enabled: true
+    label: grafana_alert
     searchNamespace: monitoring
 datasources:
   datasources.yaml:

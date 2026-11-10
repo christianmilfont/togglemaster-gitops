@@ -1,0 +1,79 @@
+name: Self-healing (rollout restart)
+
+# Disparado pelo Grafana (contact point cp-selfheal) via repository_dispatch.
+# Reinicia o deployment do servico em alerta, espera ficar saudavel e registra
+# o resultado no resumo do run. Se o restart nao resolver, o alerta continua
+# aberto no PagerDuty para um humano.
+
+on:
+  repository_dispatch:
+    types: [grafana-alert]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Servico a reiniciar (teste manual)
+        required: true
+        type: choice
+        options: [auth-service]
+
+# Um restart por vez; um alerta repetido nao empilha restarts.
+concurrency:
+  group: self-heal
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC na AWS
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  CLUSTER_NAME: togglemaster-dev
+  # Allowlist: so estes servicos podem ser reiniciados por alerta.
+  ALLOWED_SERVICES: auth-service
+
+jobs:
+  restart:
+    name: Rollout restart
+    runs-on: ubuntu-latest
+    # Ignora a notificacao 'resolved' do Grafana.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.client_payload.status == 'firing'
+    steps:
+      - name: Validar servico
+        id: svc
+        env:
+          SERVICE: ${{ github.event.client_payload.service || inputs.service }}
+        run: |
+          case " ${ALLOWED_SERVICES//,/ } " in
+            *" $SERVICE "*) echo "name=$SERVICE" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Servico '$SERVICE' fora da allowlist ($ALLOWED_SERVICES)" >&2; exit 1 ;;
+          esac
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SELFHEAL_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: kubeconfig
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
+      - name: Restart
+        env:
+          SVC: ${{ steps.svc.outputs.name }}
+        run: |
+          kubectl -n "$SVC" rollout restart "deployment/$SVC"
+          kubectl -n "$SVC" rollout status "deployment/$SVC" --timeout=180s
+
+      - name: Resumo
+        if: always()
+        env:
+          SVC: ${{ steps.svc.outputs.name }}
+          ALERT: ${{ github.event.client_payload.alertname || 'manual' }}
+        run: |
+          {
+            echo "### Self-healing: \`$SVC\`"
+            echo "- Alerta: \`$ALERT\`"
+            echo "- Resultado: **${{ job.status }}**"
+            kubectl -n "$SVC" get pods -o wide || true
+          } >> "$GITHUB_STEP_SUMMARY"
