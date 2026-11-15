@@ -49,7 +49,7 @@ data:
             # o workflow ignora 'resolved'; nem chama a API do GitHub a toa
             disableResolveMessage: true
             settings:
-              url: https://api.github.com/repos/alansenairj/togglemaster-gitops/dispatches
+              url: https://api.github.com/repos/christianmilfont/togglemaster-gitops/dispatches
               httpMethod: POST
               authorization_scheme: Bearer
               authorization_credentials: $__env{GITHUB_DISPATCH_TOKEN}
@@ -95,7 +95,7 @@ data:
             annotations:
               summary: 'auth-service com taxa de erros 5xx acima de 5% (5 min)'
               description: 'Erros 5xx = spans SERVER com status ERROR (traces_span_metrics_calls_total). Valor atual: {{ printf "%.1f" $values.B.Value }}%'
-              runbook_url: https://github.com/alansenairj/togglemaster-gitops/blob/main/monitoring/alerting/README.md
+              runbook_url: https://github.com/christianmilfont/togglemaster-gitops/blob/main/monitoring/alerting/README.md
               dashboard_path: /d/togglemaster-incidente
             data:
               - refId: A

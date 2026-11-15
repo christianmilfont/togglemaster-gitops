@@ -22,7 +22,7 @@ scripts/sync-infra-values.sh  preenche os placeholders de infra apos o terraform
 
 ## Por que subchart, nao Kustomize
 
-Os 5 manifestos da Fase 2 (`alansenairj/fase-2-manifestos-eks`) tem exatamente a mesma forma —
+Os 5 manifestos da Fase 2 (`christianmilfont/fase-2-manifestos-eks`) tem exatamente a mesma forma —
 namespace, configmap, secret, deployment, service, ingress. `charts/base-microservice` e esse
 padrao uma vez so; cada `apps/<svc>` declara ele como `dependency` (`file://../../charts/base-microservice`)
 e so muda `values.yaml`.
@@ -49,7 +49,7 @@ sem arriscar indentação ou estrutura.
 ## Secrets — o que muda da Fase 2
 
 A Fase 2 tinha `secret.yaml` com `DATABASE_URL`/`MASTER_KEY`/`SERVICE_API_KEY` versionados em
-claro (`alansenairj/fase-2-manifestos-eks/*/secret.yaml`, `vars-coletadas`). Esse repositório
+claro (`christianmilfont/fase-2-manifestos-eks/*/secret.yaml`, `vars-coletadas`). Esse repositório
 não porta esse padrão: o chart gera `ExternalSecret`, não `Secret`. O fluxo é
 
 ```

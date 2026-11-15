@@ -66,3 +66,22 @@ O link do Discord usa o `ExternalURL` do Grafana. Para ele ser clicável, defina
   Confirme em Alerting → Contact points → `togglemaster-incident` → Export se o Grafana aceitou o provisionamento.
 - O workflow ignora status `resolved` e só reinicia serviços da allowlist (`ALLOWED_SERVICES`).
 - Para outro serviço: adicione-o na allowlist, no `allowed_namespaces` do módulo `selfheal` e crie outra regra com `service: <nome>`.
+
+## Agente de triagem (somente leitura)
+
+Antes do restart, o passo `Diagnostico (agente de triagem)` do `self-heal.yml` roda
+`scripts/diagnose.py`: coleta evidencias (pods, imagem, historico de rollout, eventos, logs),
+mascara segredos, pede um diagnostico a um LLM (API compativel com OpenAI) e posta no Discord.
+Falha do agente nunca bloqueia o restart; sem LLM, posta um resumo das evidencias.
+
+Configuracao (tudo gratuito): no repo GitOps, `Settings > Secrets and variables > Actions`:
+
+| Tipo | Nome | Exemplo |
+|---|---|---|
+| variable | `LLM_BASE_URL` | `https://api.groq.com/openai/v1` |
+| variable | `LLM_MODEL` | modelo do free tier (confira o catalogo atual do provedor) |
+| secret | `LLM_API_KEY` | chave do provedor |
+| secret | `DISCORD_WEBHOOK_URL` | a mesma URL do canal `#alertas` |
+
+Repo publico: o script nao escreve evidencias nem a resposta do LLM no log do run.
+Teste local sem AWS: `local-alert-test/` (ver README la).

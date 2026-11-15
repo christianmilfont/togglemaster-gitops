@@ -1,6 +1,6 @@
 name: CI Go (reusable)
 
-# Vive em alansenairj/togglemaster-gitops/.github/workflows/
+# Vive em christianmilfont/togglemaster-gitops/.github/workflows/
 # Chamado pelos repos Go: auth-service, evaluation-service.
 #
 # Fase 1 e 2 do pipeline. Tudo aqui depende da linguagem. O que nao depende

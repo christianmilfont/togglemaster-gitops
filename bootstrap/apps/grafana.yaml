@@ -27,6 +27,6 @@ spec:
         releaseName: grafana
         valueFiles:
           - $values/monitoring/grafana/values.yaml
-    - repoURL: https://github.com/alansenairj/togglemaster-gitops.git
+    - repoURL: https://github.com/christianmilfont/togglemaster-gitops.git
       targetRevision: main
       ref: values

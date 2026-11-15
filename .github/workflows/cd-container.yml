@@ -1,6 +1,6 @@
 name: CD Container (reusable)
 
-# Vive em alansenairj/togglemaster-gitops/.github/workflows/
+# Vive em christianmilfont/togglemaster-gitops/.github/workflows/
 # Chamado pelos 5 repos de servico, Go e Python.
 #
 # Fase 3 e 4 do pipeline. Nada aqui depende da linguagem: o Dockerfile
@@ -29,7 +29,7 @@ on:
         description: "owner/repo do repositorio GitOps."
         required: false
         type: string
-        default: alansenairj/togglemaster-gitops
+        default: christianmilfont/togglemaster-gitops
       image_version:
         description: Prefixo da tag. Tag final = <image_version>-<sha curto>.
         required: false

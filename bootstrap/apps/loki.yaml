@@ -25,6 +25,6 @@ spec:
         releaseName: loki
         valueFiles:
           - $values/monitoring/loki/values.yaml
-    - repoURL: https://github.com/alansenairj/togglemaster-gitops.git
+    - repoURL: https://github.com/christianmilfont/togglemaster-gitops.git
       targetRevision: main
       ref: values
