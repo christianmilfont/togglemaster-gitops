@@ -2,7 +2,7 @@ base-microservice:
   name: flag-service
   port: 8002
   image:
-    repository: "897355252206.dkr.ecr.us-east-1.amazonaws.com/togglemaster/flag-service"
+    repository: "166422070678.dkr.ecr.us-east-1.amazonaws.com/togglemaster/flag-service"
     tag: "v1.0.0-9cd5642"
   env:
     # OTLP -> Alloy (namespace monitoring)
