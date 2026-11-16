@@ -102,7 +102,7 @@ jobs:
           ALERT: ${{ github.event.client_payload.alertname || 'manual' }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
           MAX_AGE_MIN: ${{ env.MAX_AGE_MIN }}
-        run: ./scripts/rollback.sh
+        run: bash scripts/rollback.sh
 
       - name: Avisar no Discord
         if: always() && steps.rb.outputs.result != ''
