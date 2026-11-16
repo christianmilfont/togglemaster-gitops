@@ -43,6 +43,9 @@ on:
       GITOPS_TOKEN:
         description: PAT fine-grained com escrita apenas no repositorio GitOps.
         required: true
+      DISCORD_WEBHOOK_URL:
+        description: Opcional. Se informado, avisa no Discord quando a imagem e publicada no GitOps.
+        required: false
 
 jobs:
   build-scan-push:
@@ -182,3 +185,21 @@ jobs:
 
           echo "Falha ao escrever no GitOps apos 5 tentativas." >&2
           exit 1
+
+      # Aviso visivel (ex.: video): a imagem passou em build, scan e foi publicada.
+      # Opcional e nunca derruba o pipeline.
+      - name: Avisar no Discord
+        if: success()
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SERVICE: ${{ inputs.service }}
+          TAG: ${{ needs.build-scan-push.outputs.image_tag }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$DISCORD_WEBHOOK_URL" ] || exit 0
+          MSG=$(printf '✅ **Imagem validada e publicada** — `%s` `%s`\nBuild, scan Trivy e push no ECR OK; tag gravada no GitOps (o ArgoCD aplica em ate ~3 min).\nCommit: %s\n%s' \
+            "$SERVICE" "$TAG" "$(printf '%s' "$COMMIT_MSG" | head -n1)" "$RUN_URL")
+          curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg c "$MSG" '{content:$c}')" "$DISCORD_WEBHOOK_URL"
