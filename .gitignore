@@ -10,3 +10,7 @@ apps/*/charts/*.tgz
 *.pem
 *.key
 secrets/
+
+# bytecode do Python (scripts/diagnose.py roda local e no runner)
+__pycache__/
+*.pyc

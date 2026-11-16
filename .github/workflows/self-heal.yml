@@ -1,11 +1,17 @@
-name: Self-healing (rollout restart)
+name: Self-healing (rollback de versao)
 
 # Disparado pelo Grafana (contact point cp-selfheal) via repository_dispatch.
-# Reinicia o deployment do servico em alerta, espera ficar saudavel e registra
-# o resultado no resumo do run. Se o restart nao resolver, o alerta continua
-# aberto no PagerDuty para um humano.
-# Antes do restart, um agente somente-leitura (scripts/diagnose.py) coleta evidencias,
-# pede um diagnostico a um LLM e posta no Discord. Falha dele nunca bloqueia o restart.
+# Faz o rollback da versao POR GIT: grava a tag anterior em apps/<svc>/values.yaml e da push.
+# O ArgoCD sincroniza (polling, ate ~3 min) e o Kubernetes troca para a imagem anterior.
+#
+# Por que nao restart: reiniciar executa o MESMO codigo com bug e o 5xx continua.
+# Por que nao `kubectl rollout undo`: o ArgoCD tem selfHeal=true e reaplica a tag ruim.
+#
+# Credencial: o workflow vive neste repositorio, entao o GITHUB_TOKEN (contents: write)
+# basta para o push. Nenhum PAT e guardado para o rollback.
+# O diagnostico (somente leitura) usa OIDC na AWS; se falhar, o rollback segue.
+# O rollback e idempotente e so troca a imagem: o main do servico continua com o bug,
+# a automacao mitiga, nao corrige (ver scripts/rollback.sh).
 
 on:
   repository_dispatch:
@@ -13,29 +19,36 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: Servico a reiniciar (teste manual)
+        description: Servico a reverter (teste manual)
         required: true
         type: choice
         options: [auth-service]
+      dry_run:
+        description: So mostrar a decisao, sem commit nem push
+        required: false
+        type: boolean
+        default: true
 
-# Um restart por vez; um alerta repetido nao empilha restarts.
+# Um rollback por vez; um alerta repetido nao empilha execucoes.
 concurrency:
   group: self-heal
   cancel-in-progress: false
 
 permissions:
-  id-token: write # OIDC na AWS
-  contents: read
+  id-token: write # OIDC na AWS (so o diagnostico)
+  contents: write # push do rollback neste repositorio
 
 env:
   AWS_REGION: us-east-1
   CLUSTER_NAME: togglemaster-dev
-  # Allowlist: so estes servicos podem ser reiniciados por alerta.
+  # Allowlist: so estes servicos podem ser revertidos por alerta.
   ALLOWED_SERVICES: auth-service
+  # So reverte se a versao atual foi publicada ha menos que isso (min).
+  MAX_AGE_MIN: "120"
 
 jobs:
-  restart:
-    name: Rollout restart
+  rollback:
+    name: Rollback de versao
     runs-on: ubuntu-latest
     # Ignora a notificacao 'resolved' do Grafana.
     if: >-
@@ -52,21 +65,27 @@ jobs:
             *) echo "Servico '$SERVICE' fora da allowlist ($ALLOWED_SERVICES)" >&2; exit 1 ;;
           esac
 
+      # Historico completo: o rollback procura a tag anterior no git log do values.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      # Diagnostico (somente leitura) ANTES do rollback, enquanto os logs do pod ruim existem.
+      # Nada vai para o log do run: o repo e publico. Nunca bloqueia o rollback.
+      - name: Credenciais AWS (diagnostico)
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.SELFHEAL_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: kubeconfig
+      - name: kubeconfig (diagnostico)
+        continue-on-error: true
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
 
-      # Antes do restart: depois dele os logs do pod com problema desaparecem.
-      # Somente leitura (kubectl get/logs). Nada vai para o log do run: o repo e publico.
       - name: Diagnostico (agente de triagem)
         continue-on-error: true
-        timeout-minutes: 3 # LLM lento ou travado nao pode atrasar o restart
+        timeout-minutes: 3 # LLM lento ou travado nao pode atrasar o rollback
         env:
           SVC: ${{ steps.svc.outputs.name }}
           ALERT: ${{ github.event.client_payload.alertname || 'manual' }}
@@ -76,12 +95,35 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python3 scripts/diagnose.py
 
-      - name: Restart
+      - name: Rollback por Git
+        id: rb
         env:
           SVC: ${{ steps.svc.outputs.name }}
+          ALERT: ${{ github.event.client_payload.alertname || 'manual' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          MAX_AGE_MIN: ${{ env.MAX_AGE_MIN }}
+        run: ./scripts/rollback.sh
+
+      - name: Avisar no Discord
+        if: always() && steps.rb.outputs.result != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SVC: ${{ steps.svc.outputs.name }}
+          RESULT: ${{ steps.rb.outputs.result }}
+          FROM: ${{ steps.rb.outputs.from_tag }}
+          TO: ${{ steps.rb.outputs.to_tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          kubectl -n "$SVC" rollout restart "deployment/$SVC"
-          kubectl -n "$SVC" rollout status "deployment/$SVC" --timeout=180s
+          [ -n "$DISCORD_WEBHOOK_URL" ] || exit 0
+          case "$RESULT" in
+            rolled_back)         MSG="Self-healing: rollback de \`$SVC\` \`$FROM\` -> \`$TO\` enviado ao GitOps. O ArgoCD aplica em ate ~3 min." ;;
+            already_rolled_back) MSG="Self-healing: \`$SVC\` ja foi revertido (alerta repetido). Nada a fazer." ;;
+            too_old)             MSG="Self-healing: a versao \`$FROM\` de \`$SVC\` nao e recente; sem rollback. Investigar manualmente." ;;
+            dry_run)             MSG="Self-healing (teste): reverteria \`$SVC\` \`$FROM\` -> \`$TO\`." ;;
+            *)                   MSG="Self-healing: rollback de \`$SVC\` falhou ($RESULT). Acao humana necessaria." ;;
+          esac
+          curl -s -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -d "$(printf '{"content":"%s\\n%s"}' "$MSG" "$RUN_URL")" "$DISCORD_WEBHOOK_URL"
 
       - name: Resumo
         if: always()
@@ -92,6 +134,7 @@ jobs:
           {
             echo "### Self-healing: \`$SVC\`"
             echo "- Alerta: \`$ALERT\`"
-            echo "- Resultado: **${{ job.status }}**"
-            kubectl -n "$SVC" get pods -o wide || true
+            echo "- Resultado: **${{ steps.rb.outputs.result || job.status }}**"
+            echo "- Versao: \`${{ steps.rb.outputs.from_tag }}\` -> \`${{ steps.rb.outputs.to_tag }}\`"
+            echo "- O ArgoCD aplica o rollback no proximo sync (polling, ate ~3 min)."
           } >> "$GITHUB_STEP_SUMMARY"

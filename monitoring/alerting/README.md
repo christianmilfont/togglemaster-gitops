@@ -8,7 +8,7 @@ Prometheus (spanmetrics) -> regra Grafana AuthServiceHigh5xxRate (5xx > 5%, 5 mi
         |- PagerDuty : abre incidente (Events API v2)
         |- Discord   : mensagem com resumo, runbook e dashboard
         '- webhook   : GitHub repository_dispatch -> .github/workflows/self-heal.yml
-                         -> OIDC AWS -> kubectl rollout restart deployment/auth-service
+                         -> rollback por Git: grava a tag anterior em apps/auth/values.yaml e da push -> ArgoCD aplica
 ```
 
 Tudo é provisionado por ConfigMaps em `monitoring/dashboards/` (sidecar do Grafana):
@@ -57,7 +57,7 @@ O link do Discord usa o `ExternalURL` do Grafana. Para ele ser clicável, defina
 2. **Contact points**: Grafana → Alerting → Contact points → *Test* em cada integração.
 3. **Ponta a ponta**: gere 5xx no auth-service (ex.: `kubectl -n auth-service set env deployment/auth-service DATABASE_URL=postgres://x`
    e faça requests contínuos em `/auth/...`). Em ~4 min: incidente no PagerDuty, mensagem no Discord e run da Action.
-   Note que o restart não resolve esse defeito de configuração: o incidente continua aberto, como esperado.
+   Rollback nao resolve defeito de configuracao nem queda de banco: o incidente continua aberto, como esperado. Para demonstrar o rollback, use um deploy com bug (README do self-heal: `scripts/rollback.sh`).
    Reverta pelo ArgoCD (self-heal do Argo restaura o env).
 
 ## Notas
@@ -69,10 +69,10 @@ O link do Discord usa o `ExternalURL` do Grafana. Para ele ser clicável, defina
 
 ## Agente de triagem (somente leitura)
 
-Antes do restart, o passo `Diagnostico (agente de triagem)` do `self-heal.yml` roda
+Antes do rollback, o passo `Diagnostico (agente de triagem)` do `self-heal.yml` roda
 `scripts/diagnose.py`: coleta evidencias (pods, imagem, historico de rollout, eventos, logs),
 mascara segredos, pede um diagnostico a um LLM (API compativel com OpenAI) e posta no Discord.
-Falha do agente nunca bloqueia o restart; sem LLM, posta um resumo das evidencias.
+Falha do agente nunca bloqueia o rollback; sem LLM, posta um resumo das evidencias.
 
 Configuracao (tudo gratuito): no repo GitOps, `Settings > Secrets and variables > Actions`:
 

@@ -37,13 +37,13 @@ data:
                 {{ .CommonAnnotations.description }}
                 Runbook: {{ .CommonAnnotations.runbook_url }}
                 Dashboard: {{ .ExternalURL }}{{ .CommonAnnotations.dashboard_path }}
-                {{ if eq .Status "firing" }}Self-healing: rollout restart de {{ .CommonLabels.service }} solicitado via GitHub Actions.{{ end }}
+                {{ if eq .Status "firing" }}Self-healing: rollback de versao de {{ .CommonLabels.service }} solicitado via GitHub Actions (GitOps).{{ end }}
       # Self-healing em contact point proprio para ter rota/repeat_interval proprios
       # (ver policies.yaml). Fora do togglemaster-incident, que repete a cada 4h.
       - orgId: 1
         name: togglemaster-selfheal
         receivers:
-          # Self-healing: repository_dispatch no GitHub, que roda o rollout restart
+          # Self-healing: repository_dispatch no GitHub, que roda o rollback de versao (self-heal.yml)
           - uid: cp-selfheal
             type: webhook
             # o workflow ignora 'resolved'; nem chama a API do GitHub a toa
@@ -66,8 +66,8 @@ data:
         group_interval: 5m
         repeat_interval: 4h
         routes:
-          # Self-healing: tenta no maximo 1 restart por dia por alerta. Se o restart nao
-          # resolveu, repetir a cada 4h so gera loop de restart; o PagerDuty ja acordou um humano.
+          # Self-healing: no maximo 1 tentativa por dia por alerta. O rollback e idempotente e so
+          # troca a imagem; se nao resolveu, o PagerDuty ja acordou um humano.
           # continue: true -> o mesmo alerta segue para a rota abaixo (PagerDuty + Discord).
           - receiver: togglemaster-selfheal
             object_matchers: [["service", "=~", ".+"]]
