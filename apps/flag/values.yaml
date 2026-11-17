@@ -3,7 +3,7 @@ base-microservice:
   port: 8002
   image:
     repository: "166422070678.dkr.ecr.us-east-1.amazonaws.com/togglemaster/flag-service"
-    tag: "v1.0.0-a314184"
+    tag: "v1.0.0-1d361e3"
   env:
     # OTLP -> Alloy (namespace monitoring)
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.monitoring.svc.cluster.local:4317"
