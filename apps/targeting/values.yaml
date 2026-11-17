@@ -3,7 +3,7 @@ base-microservice:
   port: 8003
   image:
     repository: "166422070678.dkr.ecr.us-east-1.amazonaws.com/togglemaster/targeting-service"
-    tag: "v1.0.0-c791355"
+    tag: "v1.0.0-3704d95"
   env:
     # OTLP -> Alloy (namespace monitoring)
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.monitoring.svc.cluster.local:4317"
