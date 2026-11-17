@@ -9,7 +9,7 @@ base-microservice:
     # preenchido por scripts/sync-infra-values.sh apos o terraform apply;
     # sobrescrito pelo job gitops-writeback a cada push na main
     repository: "166422070678.dkr.ecr.us-east-1.amazonaws.com/togglemaster/auth-service"
-    tag: "v1.0.0-64981e1"
+    tag: "v1.0.0-390ded0"
   ingress:
     path: /auth(/|$)(.*)
   externalSecret:
